@@ -20,19 +20,37 @@ class TravelChatControllerTest extends TestCase
             'temperature' => 0,
         ]);
 
+        $llmHtml = [
+            'full' => '<section class="llm-full"><h2>Cox\'s Bazar Travel Plan</h2><p>There are 3 travel resources ready for you.</p></section>',
+            'summary' => '<section class="llm-summary"><p>We found trips, packages, and hotels for Cox\'s Bazar.</p></section>',
+            'trips' => '<section class="llm-trips"><h3>Trips</h3><p>Trip 1: Cox Trip</p></section>',
+            'packages' => '<section class="llm-packages"><h3>Packages</h3><p>Package 1: Cox Package</p></section>',
+            'hotels' => '<section class="llm-hotels"><h3>Hotels</h3><p>Hotel 1: Cox Hotel</p></section>',
+        ];
+
         Http::fake([
-            'https://llm.example/v1/chat/completions' => Http::response([
-                'choices' => [
-                    [
-                        'message' => [
-                            'content' => json_encode([
-                                'location' => "Cox's Bazar",
-                                'resources' => ['trips', 'packages', 'hotels'],
-                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'https://llm.example/v1/chat/completions' => Http::sequence()
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => json_encode([
+                                    'location' => "Cox's Bazar",
+                                    'resources' => ['trips', 'packages', 'hotels'],
+                                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                            ],
                         ],
                     ],
-                ],
-            ], 200),
+                ], 200)
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => json_encode($llmHtml, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                            ],
+                        ],
+                    ],
+                ], 200),
             'https://travelbooking.infinitycodehubltd.com/public/api/trips*' => Http::response([
                 'data' => [
                     [
@@ -89,25 +107,25 @@ class TravelChatControllerTest extends TestCase
                 'data' => ['trips', 'packages', 'hotels'],
             ]);
 
-        $this->assertStringContainsString('travel-chat-response', $fullHtml);
-        $this->assertStringContainsString('Travel Overview', $fullHtml);
-        $this->assertStringContainsString('Trip 1', $fullHtml);
-        $this->assertStringContainsString('<article', $tripsHtml);
-        $this->assertStringContainsString('<table', $tripsHtml);
+        $this->assertStringContainsString('llm-full', $fullHtml);
+        $this->assertStringContainsString("Cox's Bazar Travel Plan", $fullHtml);
+        $this->assertStringContainsString('There are 3 travel resources ready for you.', $fullHtml);
         $this->assertStringContainsString('Cox Trip', $tripsHtml);
-        $this->assertStringContainsString('There is 1 trip available for Cox&#039;s Bazar.', $tripsHtml);
         $this->assertStringContainsString('Trip 1', $tripsHtml);
-        $this->assertStringContainsString('Available', $tripsHtml);
-        $this->assertStringContainsString('109,999.00', $tripsHtml);
-        $this->assertStringContainsString('30 Jun 2026, 12:00 AM', $tripsHtml);
-        $this->assertStringContainsString('Ocean Area to Cox&#039;s Bazar via Dhaka-Cox&#039;s Bazar', $tripsHtml);
-        $this->assertStringNotContainsString('travel/example.jpg', $tripsHtml);
-        $this->assertStringNotContainsString('<pre>', $tripsHtml);
+        $this->assertSame($llmHtml['summary'], $response->json('html.summary'));
+        $this->assertSame($llmHtml['trips'], $response->json('html.trips'));
+        $this->assertSame($llmHtml['packages'], $response->json('html.packages'));
+        $this->assertSame($llmHtml['hotels'], $response->json('html.hotels'));
 
         Http::assertSent(fn ($request): bool => $request->method() === 'POST'
             && $request->url() === 'https://llm.example/v1/chat/completions'
             && $request['model'] === 'gpt-4o-mini'
             && data_get($request->data(), 'messages.1.content') === "Give all information about Cox's Bazar trip, package and hotel");
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://llm.example/v1/chat/completions'
+            && str_contains((string) data_get($request->data(), 'messages.1.content'), '"customer_message": "Give all information about Cox\'s Bazar trip, package and hotel"')
+            && str_contains((string) data_get($request->data(), 'messages.1.content'), '"location": "Cox\'s Bazar"'));
 
         Http::assertSent(fn ($request): bool => $request->method() === 'POST'
             && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/trips'
@@ -133,16 +151,34 @@ class TravelChatControllerTest extends TestCase
             'temperature' => 0,
         ]);
 
+        $llmHtml = [
+            'full' => '<section class="llm-full"><p>There is 1 trip available for Cox\'s Bazar.</p></section>',
+            'summary' => '<section class="llm-summary"><p>We found one trip for Cox\'s Bazar.</p></section>',
+            'trips' => '<section class="llm-trips"><h3>Trips</h3><p>Trip 1: Beach Flight</p></section>',
+            'packages' => '',
+            'hotels' => '',
+        ];
+
         Http::fake([
-            'https://llm.example/v1/chat/completions' => Http::response([
-                'choices' => [
-                    [
-                        'message' => [
-                            'content' => '{"location":"Cox\'s Bazar","resources":["trips"]}',
+            'https://llm.example/v1/chat/completions' => Http::sequence()
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => '{"location":"Cox\'s Bazar","resources":["trips"]}',
+                            ],
                         ],
                     ],
-                ],
-            ], 200),
+                ], 200)
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => json_encode($llmHtml, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                            ],
+                        ],
+                    ],
+                ], 200),
             'https://travelbooking.infinitycodehubltd.com/public/api/trips*' => Http::response([
                 'data' => [
                     [
@@ -166,17 +202,22 @@ class TravelChatControllerTest extends TestCase
 
         $this->assertSame(['trips'], $response->json('parsed.resources'));
         $this->assertSame(['trips'], array_keys($response->json('data')));
-        $this->assertStringContainsString('Beach Flight', (string) $response->json('html.trips'));
+        $this->assertSame($llmHtml['trips'], $response->json('html.trips'));
+        $this->assertSame($llmHtml['full'], $response->json('html.full'));
 
         Http::assertSent(fn ($request): bool => $request->method() === 'POST'
             && $request->url() === 'https://llm.example/v1/chat/completions'
             && data_get($request->data(), 'messages.1.content') === "fetch all information of cox's bazer trips");
 
         Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://llm.example/v1/chat/completions'
+            && str_contains((string) data_get($request->data(), 'messages.1.content'), '"requested_resources": ['));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
             && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/trips'
             && $request->data() === ['location' => "Cox's Bazar"]);
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
     }
 
     public function test_it_returns_upstream_llm_status_and_message_when_intent_extraction_fails(): void
@@ -211,5 +252,57 @@ class TravelChatControllerTest extends TestCase
                     'message' => "fetch all information of cox's bazer trips",
                 ],
             ]);
+    }
+
+    public function test_it_falls_back_to_renderer_when_response_generation_llm_fails(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::sequence()
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => '{"location":"Cox\'s Bazar","resources":["trips"]}',
+                            ],
+                        ],
+                    ],
+                ], 200)
+                ->push([
+                    'error' => [
+                        'message' => 'Temporarily overloaded.',
+                    ],
+                ], 429),
+            'https://travelbooking.infinitycodehubltd.com/public/api/trips*' => Http::response([
+                'data' => [
+                    [
+                        'name' => 'Beach Flight',
+                        'destination' => "Cox's Bazar",
+                        'status' => 1,
+                        'price' => '13300',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer test-token')
+            ->postJson('/api/chat', [
+                'message' => "fetch all information of cox's bazer trips",
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('parsed.location', "Cox's Bazar");
+
+        $this->assertStringContainsString('Trip 1', (string) $response->json('html.trips'));
+        $this->assertStringContainsString('Beach Flight', (string) $response->json('html.trips'));
+        $this->assertStringContainsString('travel-chat-response', (string) $response->json('html.full'));
     }
 }

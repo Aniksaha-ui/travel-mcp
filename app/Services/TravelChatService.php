@@ -11,6 +11,7 @@ class TravelChatService
     public function __construct(
         private readonly TravelQueryParser $travelQueryParser,
         private readonly TravelBookingApiClient $travelBookingApiClient,
+        private readonly TravelChatLlmResponseGenerator $travelChatLlmResponseGenerator,
         private readonly TravelChatHtmlRenderer $travelChatHtmlRenderer,
     ) {
     }
@@ -57,7 +58,7 @@ class TravelChatService
         }
 
         $overview = $this->travelBookingApiClient->searchOverview($bearerToken, $location, $resources);
-        $html = $this->travelChatHtmlRenderer->render($location, $overview, $resources);
+        $html = $this->travelChatLlmResponseGenerator->generate($message, $location, $overview, $resources);
         $partialFailure = collect($overview)->contains(fn (array $section): bool => ($section['error'] ?? false) === true);
         $allFailed = collect($overview)->every(fn (array $section): bool => ($section['error'] ?? false) === true);
 

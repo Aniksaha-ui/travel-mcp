@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
 class TravelQueryParser
 {
+    public function __construct(
+        private readonly TravelLlmClient $travelLlmClient,
+    ) {
+    }
+
     /**
      * @var array<int, string>
      */
@@ -23,7 +25,7 @@ class TravelQueryParser
     public function parse(string $message): array
     {
         $decoded = $this->requestTravelIntent($message);
-        Log::info(("intented decoded: ".json_encode($decoded)));
+
         return [
             'location' => $this->normalizeLocation($decoded['location'] ?? null),
             'resources' => $this->normalizeResources($decoded['resources'] ?? null),
@@ -35,58 +37,11 @@ class TravelQueryParser
      */
     private function requestTravelIntent(string $message): array
     {
-        $baseUrl = rtrim((string) config('services.travel_intent_llm.base_url'), '/');
-        $apiKey = trim((string) config('services.travel_intent_llm.api_key'));
-        $model = trim((string) config('services.travel_intent_llm.model'));
-
-        if ($baseUrl === '' || $apiKey === '' || $model === '') {
-            throw new RuntimeException(
-                'Travel intent LLM is not configured. Please set the travel intent LLM service credentials.',
-                500,
-            );
-        }
-
-        try {
-            $response = Http::acceptJson()
-                ->asJson()
-                ->withToken($apiKey)
-                ->connectTimeout((int) config('services.travel_intent_llm.connect_timeout', 5))
-                ->timeout((int) config('services.travel_intent_llm.timeout', 20))
-                ->post($baseUrl.'/chat/completions', [
-                    'model' => $model,
-                    'temperature' => (float) config('services.travel_intent_llm.temperature', 0),
-                    'messages' => [
-                        [
-                            'role' => 'system',
-                            'content' => $this->systemPrompt(),
-                        ],
-                        [
-                            'role' => 'user',
-                            'content' => $message,
-                        ],
-                    ],
-                ]);
-        } catch (ConnectionException $exception) {
-            throw new RuntimeException('Unable to reach the configured travel intent LLM.', 503, $exception);
-        }
-
-        if (! $response->successful()) {
-            $status = $response->status();
-            $providerMessage = $response->json('error.message');
-
-            if (! is_string($providerMessage) || trim($providerMessage) === '') {
-                $providerMessage = 'The configured travel intent LLM request failed.';
-            }
-
-            throw new RuntimeException(trim($providerMessage), $status);
-        }
-
-        $content = data_get($response->json(), 'choices.0.message.content');
-        $text = $this->extractTextContent($content);
-
-        if ($text === null) {
-            throw new RuntimeException('Travel intent LLM returned an empty response.', 502);
-        }
+        $text = $this->travelLlmClient->chat(
+            systemPrompt: $this->systemPrompt(),
+            userPrompt: $message,
+            temperature: 0,
+        );
 
         $decoded = json_decode($text, true);
 
@@ -178,40 +133,5 @@ PROMPT;
         $normalized = array_values(array_unique($normalized));
 
         return $normalized === [] ? self::RESOURCES : $normalized;
-    }
-
-    private function extractTextContent(mixed $content): ?string
-    {
-        if (is_string($content)) {
-            $trimmed = trim($content);
-
-            return $trimmed !== '' ? $trimmed : null;
-        }
-
-        if (! is_array($content)) {
-            return null;
-        }
-
-        $parts = [];
-
-        foreach ($content as $part) {
-            if (is_string($part) && trim($part) !== '') {
-                $parts[] = trim($part);
-
-                continue;
-            }
-
-            if (! is_array($part)) {
-                continue;
-            }
-
-            $text = $part['text'] ?? $part['content'] ?? null;
-
-            if (is_string($text) && trim($text) !== '') {
-                $parts[] = trim($text);
-            }
-        }
-
-        return $parts === [] ? null : implode("\n", $parts);
     }
 }
