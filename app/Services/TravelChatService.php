@@ -54,7 +54,9 @@ class TravelChatService
                 'resources' => $resources,
             ],
             'partial_failure' => $partialFailure,
+            'presentation_instruction' => $this->travelChatHtmlRenderer->presentationInstruction(),
             'html' => [
+                'full' => $html['full'],
                 'summary' => $html['summary'],
                 'trips' => $html['trips'],
                 'packages' => $html['packages'],

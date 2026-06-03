@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 
 #[Name('travel-server')]
 #[Version('1.0.0')]
-#[Instructions('Provides authenticated trip, package, and hotel search tools for the travel platform. Every tool forwards the caller bearer token to the remote TravelBooking API, and the overview tool can fetch all three datasets together for a single location.')]
+#[Instructions('Provides authenticated trip, package, and hotel search tools for the travel platform. Every tool forwards the caller bearer token to the remote TravelBooking API, and the overview tool can fetch all three datasets together for a single location. When presenting tool results to the user, prefer attractive and professional HTML with clear section headings, a short natural-language summary, result counts such as "There are 5 trips", and numbered detail blocks like "Trip 1". Use tables for quick comparison when helpful, but keep the overall response conversational and human-readable rather than dumping raw JSON or flat field lists.')]
 class TravelServer extends Server
 {
     /**
