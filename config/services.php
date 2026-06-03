@@ -44,4 +44,13 @@ return [
         'timeout' => (int) env('TRAVELBOOKING_TIMEOUT', 20),
     ],
 
+    'travel_intent_llm' => [
+        'base_url' => env('TRAVEL_INTENT_LLM_BASE_URL', env('OPENAI_BASE_URL', 'https://api.openai.com/v1')),
+        'api_key' => env('TRAVEL_INTENT_LLM_API_KEY', env('OPENAI_API_KEY')),
+        'model' => env('TRAVEL_INTENT_LLM_MODEL', env('OPENAI_MODEL', 'gpt-4o-mini')),
+        'connect_timeout' => (int) env('TRAVEL_INTENT_LLM_CONNECT_TIMEOUT', 5),
+        'timeout' => (int) env('TRAVEL_INTENT_LLM_TIMEOUT', 20),
+        'temperature' => (float) env('TRAVEL_INTENT_LLM_TEMPERATURE', 0),
+    ],
+
 ];

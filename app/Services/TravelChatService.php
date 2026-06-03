@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use Throwable;
+
 class TravelChatService
 {
     public function __construct(
@@ -18,7 +20,25 @@ class TravelChatService
      */
     public function handle(string $message, string $bearerToken): array
     {
-        $parsed = $this->travelQueryParser->parse($message);
+        try {
+            $parsed = $this->travelQueryParser->parse($message);
+        } catch (Throwable $exception) {
+            report($exception);
+            $status = is_int($exception->getCode()) && $exception->getCode() >= 400 && $exception->getCode() <= 599
+                ? $exception->getCode()
+                : 502;
+
+            return [
+                'status' => $status,
+                'message' => $exception->getMessage() !== ''
+                    ? $exception->getMessage()
+                    : 'Unable to analyze the travel request with the configured LLM.',
+                'input' => [
+                    'message' => $message,
+                ],
+            ];
+        }
+
         $location = $parsed['location'];
         $resources = $parsed['resources'];
 

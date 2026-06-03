@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Tools\ExtractTravelIntentTool;
 use App\Mcp\Tools\SearchHotelsTool;
 use App\Mcp\Tools\SearchPackagesTool;
 use App\Mcp\Tools\SearchTravelOverviewTool;
@@ -15,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 
 #[Name('travel-server')]
 #[Version('1.0.0')]
-#[Instructions('Provides authenticated trip, package, and hotel search tools for the travel platform. Every tool forwards the caller bearer token to the remote TravelBooking API, and the overview tool can fetch all three datasets together for a single location. When presenting tool results to the user, prefer attractive and professional HTML with clear section headings, a short natural-language summary, result counts such as "There are 5 trips", and numbered detail blocks like "Trip 1". Use tables for quick comparison when helpful, but keep the overall response conversational and human-readable rather than dumping raw JSON or flat field lists.')]
+#[Instructions('Provides authenticated trip, package, and hotel search tools for the travel platform. Every tool forwards the caller bearer token to the remote TravelBooking API, the overview tool can fetch all three datasets together for a single location, and the travel intent tool uses the configured LLM to normalize customer messages into a location plus requested resource types. When presenting tool results to the user, prefer attractive and professional HTML with clear section headings, a short natural-language summary, result counts such as "There are 5 trips", and numbered detail blocks like "Trip 1". Use tables for quick comparison when helpful, but keep the overall response conversational and human-readable rather than dumping raw JSON or flat field lists.')]
 class TravelServer extends Server
 {
     /**
@@ -24,6 +25,7 @@ class TravelServer extends Server
      * @var array<int, class-string<\Laravel\Mcp\Server\Tool>>
      */
     protected array $tools = [
+        ExtractTravelIntentTool::class,
         SearchTripsTool::class,
         SearchPackagesTool::class,
         SearchHotelsTool::class,
