@@ -66,6 +66,7 @@ Rules:
 - If there is a clear direct match for a named hotel, package, or trip, mention that item directly before giving broader context.
 - The summary should quickly explain what was found for the request.
 - Resource sections should be readable and polished, using headings, counts, tables, and concise descriptive blocks when useful.
+- When trips are shown, include a short next-step hint telling the customer they can reply with "book the <trip name> trip" to see available seats or continue the booking in chat.
 - If a resource was not requested, return an empty string for that resource section.
 - If no matching items are found for a requested resource, explain that politely in HTML.
 - If a resource failed, explain that section politely in HTML.

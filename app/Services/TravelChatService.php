@@ -9,6 +9,7 @@ use Throwable;
 class TravelChatService
 {
     public function __construct(
+        private readonly BookingChatService $bookingChatService,
         private readonly SupportTicketChatService $supportTicketChatService,
         private readonly TravelQueryParser $travelQueryParser,
         private readonly TravelBookingApiClient $travelBookingApiClient,
@@ -22,6 +23,10 @@ class TravelChatService
      */
     public function handle(string $message, string $bearerToken): array
     {
+        if ($this->bookingChatService->shouldHandle($message)) {
+            return $this->bookingChatService->handle($message, $bearerToken);
+        }
+
         if ($this->supportTicketChatService->shouldHandle($message)) {
             return $this->supportTicketChatService->handle($message, $bearerToken);
         }

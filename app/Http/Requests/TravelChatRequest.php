@@ -20,6 +20,7 @@ class TravelChatRequest extends FormRequest
     {
         return [
             'message' => ['required', 'string', 'max:5000'],
+            'full_html_only' => ['sometimes', 'boolean'],
         ];
     }
 }

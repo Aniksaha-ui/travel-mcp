@@ -9,6 +9,13 @@ use Tests\TestCase;
 
 class TravelChatControllerTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.travel_chat.full_html_only', false);
+    }
+
     public function test_it_returns_travel_data_and_html_for_a_customer_message(): void
     {
         config()->set('services.travel_intent_llm', [
@@ -95,7 +102,7 @@ class TravelChatControllerTest extends TestCase
             ->assertJsonPath('data.packages.error', false)
             ->assertJsonPath('data.hotels.error', false)
             ->assertJsonPath('data.trips.endpoint', 'https://travelbooking.infinitycodehubltd.com/public/api/trips')
-            ->assertJsonPath('presentation_instruction', 'Present travel results as attractive, professional HTML. Start with a short natural-language summary like "There are 5 trips available for Cox\'s Bazar", then show a quick comparison table when useful, followed by numbered sections such as "Trip 1" or "Hotel 2". Keep the tone human and polished, highlight important details like price, status, rating, and description, and never dump raw JSON.')
+            ->assertJsonPath('presentation_instruction', 'Present travel results as attractive, professional HTML. Start with a short natural-language summary like "There are 5 trips available for Cox\'s Bazar", then show a quick comparison table when useful, followed by numbered sections such as "Trip 1" or "Hotel 2". Keep the tone human and polished, highlight important details like price, status, rating, and description, and never dump raw JSON. When trips are shown, add a simple booking hint such as "Reply: book the Beach Flight trip" so the customer knows chat can show available seats next.')
             ->assertJsonStructure([
                 'status',
                 'message',
@@ -343,6 +350,53 @@ class TravelChatControllerTest extends TestCase
             ]);
     }
 
+    public function test_it_returns_only_full_html_by_default_when_configured(): void
+    {
+        config()->set('services.travel_chat.full_html_only', true);
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'title' => 'Booking payment issue',
+                                'description' => 'My booking payment failed and I need support to check it.',
+                                'remarks' => null,
+                                'needs_more_information' => false,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket' => Http::response([
+                'isExecute' => true,
+                'message' => 'Ticket created successfully.',
+                'data' => [
+                    'id' => 91,
+                ],
+            ], 201),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer compact-token')
+            ->postJson('/api/chat', [
+                'message' => 'Please create a ticket because my booking payment failed.',
+            ]);
+
+        $response->assertOk();
+
+        $this->assertSame(['html'], array_keys($response->json()));
+        $this->assertStringContainsString('Ticket Created', (string) $response->json('html.full'));
+    }
+
     public function test_it_falls_back_to_renderer_when_response_generation_llm_fails(): void
     {
         config()->set('services.travel_intent_llm', [
@@ -392,7 +446,555 @@ class TravelChatControllerTest extends TestCase
 
         $this->assertStringContainsString('Trip 1', (string) $response->json('html.trips'));
         $this->assertStringContainsString('Beach Flight', (string) $response->json('html.trips'));
+        $this->assertStringContainsString('Reply: book the Beach Flight trip', (string) $response->json('html.trips'));
         $this->assertStringContainsString('travel-chat-response', (string) $response->json('html.full'));
+    }
+
+    public function test_it_can_show_available_trip_seats_when_customer_books_by_trip_name(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'action' => 'book_trip',
+                                'trip_id' => null,
+                                'trip_name' => 'Beach Flight',
+                                'seat_numbers' => [],
+                                'hotel_id' => null,
+                                'hotel_room_id' => null,
+                                'check_in_date' => null,
+                                'check_out_date' => null,
+                                'total_persons' => null,
+                                'payment_method' => null,
+                                'payment_reference' => null,
+                                'needs_more_information' => true,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/trips' => Http::response([
+                'data' => [
+                    [
+                        'id' => 15,
+                        'trip_name' => 'Beach Flight',
+                        'destination' => "Cox's Bazar",
+                        'price' => '550.00',
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'tripSummaries' => [
+                        [
+                            'trip_id' => 15,
+                            'trip_name' => 'Beach Flight',
+                            'price' => '550.00',
+                        ],
+                    ],
+                    'seat_layout' => [
+                        ['trip_id' => 15, 'seat_id' => 101, 'seat_number' => 'A1', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 102, 'seat_number' => 'A2', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 104, 'seat_number' => 'A4', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 106, 'seat_number' => 'A6', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                    ],
+                ],
+                'message' => 'success',
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer trip-name-token')
+            ->postJson('/api/chat', [
+                'message' => 'Book the Beach Flight trip',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('action', 'book_trip')
+            ->assertJsonPath('booking.type', 'trip')
+            ->assertJsonPath('booking.created', false)
+            ->assertJsonPath('booking.needs_more_information', true)
+            ->assertJsonPath('booking.payload.trip_id', 15)
+            ->assertJsonPath('booking.payload.trip_name', 'Beach Flight')
+            ->assertJsonPath('booking.seat_information.0.seat_number', 'A1')
+            ->assertJsonPath('booking.seat_information.0.is_available', true)
+            ->assertJsonPath('message', 'These seats are currently available for this trip. Reply with the seat numbers you want to reserve.');
+
+        $this->assertSame(['A1', 'A2', 'A4', 'A6'], $response->json('booking.available_seat_numbers'));
+        $this->assertStringContainsString('A1, A2, A4, A6', (string) $response->json('html.full'));
+        $this->assertStringContainsString('book the Beach Flight trip, seats are A1,A2', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/trips'
+            && $request->data() === ['location' => 'Beach Flight']);
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery'
+            && $request->data() === ['trip_id' => 15]);
+    }
+
+    public function test_it_requests_payment_method_after_trip_name_and_seats_are_selected(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'action' => 'book_trip',
+                                'trip_id' => null,
+                                'trip_name' => 'Beach Flight',
+                                'seat_numbers' => ['A1', 'A2', 'A4', 'A6'],
+                                'hotel_id' => null,
+                                'hotel_room_id' => null,
+                                'check_in_date' => null,
+                                'check_out_date' => null,
+                                'total_persons' => null,
+                                'payment_method' => null,
+                                'payment_reference' => null,
+                                'needs_more_information' => true,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/trips' => Http::response([
+                'data' => [
+                    [
+                        'id' => 15,
+                        'trip_name' => 'Beach Flight',
+                        'destination' => "Cox's Bazar",
+                        'price' => '550.00',
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'tripSummaries' => [
+                        [
+                            'trip_id' => 15,
+                            'trip_name' => 'Beach Flight',
+                            'price' => '550.00',
+                        ],
+                    ],
+                    'seat_layout' => [
+                        ['trip_id' => 15, 'seat_id' => 101, 'seat_number' => 'A1', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 102, 'seat_number' => 'A2', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 104, 'seat_number' => 'A4', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 106, 'seat_number' => 'A6', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                    ],
+                ],
+                'message' => 'success',
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer trip-seat-token')
+            ->postJson('/api/chat', [
+                'message' => 'Book the Beach Flight trip, seats are A1,A2,A4,A6',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('action', 'book_trip')
+            ->assertJsonPath('booking.type', 'trip')
+            ->assertJsonPath('booking.created', false)
+            ->assertJsonPath('booking.needs_more_information', true)
+            ->assertJsonPath('booking.payload.trip_id', 15)
+            ->assertJsonPath('booking.payload.trip_name', 'Beach Flight')
+            ->assertJsonPath('booking.amount', 2200)
+            ->assertJsonPath('message', 'Please send the payment method to finish the trip booking. Use card, bkash, nagad, or internet banking.');
+
+        $this->assertSame(['A1', 'A2', 'A4', 'A6'], $response->json('booking.selected_seat_numbers'));
+        $this->assertStringContainsString('Choose Payment Method', (string) $response->json('html.full'));
+        $this->assertStringContainsString('book the Beach Flight trip, seats are A1,A2,A4,A6, payment by bkash 01700000000', (string) $response->json('html.full'));
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/booking');
+    }
+
+    public function test_it_ignores_trip_reference_numbers_inside_the_trip_title_and_books_the_resolved_trip(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'action' => 'book_trip',
+                                'trip_id' => 2849149,
+                                'trip_name' => "Grand trip Cox's Bazer",
+                                'seat_numbers' => ['A1', 'A2'],
+                                'hotel_id' => null,
+                                'hotel_room_id' => null,
+                                'check_in_date' => null,
+                                'check_out_date' => null,
+                                'total_persons' => null,
+                                'payment_method' => 'bkash',
+                                'payment_reference' => '01628781323',
+                                'needs_more_information' => false,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/trips' => Http::response([
+                'data' => [
+                    [
+                        'id' => 28,
+                        'trip_name' => "Grand trip Cox's Bazer",
+                        'destination' => "Cox's Bazer",
+                        'price' => '550.00',
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'tripSummaries' => [
+                        [
+                            'trip_id' => 28,
+                            'trip_name' => "Grand trip Cox's Bazer",
+                            'price' => '550.00',
+                        ],
+                    ],
+                    'seat_layout' => [
+                        ['trip_id' => 28, 'seat_id' => 201, 'seat_number' => 'A1', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 28, 'seat_id' => 202, 'seat_number' => 'A2', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                    ],
+                ],
+                'message' => 'success',
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/booking' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'booking_id' => 108,
+                    'trip_id' => 28,
+                    'payment_id' => 501,
+                ],
+                'message' => 'Booking successfully created!',
+            ], 201),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer named-trip-token')
+            ->postJson('/api/chat', [
+                'message' => "book the Grand trip Cox's Bazer #2849149 trip, seats are A1,A2, payment by bkash 01628781323",
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('booking.payload.trip_id', 28)
+            ->assertJsonPath('booking.payload.trip_name', "Grand trip Cox's Bazer")
+            ->assertJsonPath('message', 'Booking successfully created!');
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery'
+            && $request->data() === ['trip_id' => 28]);
+
+        Http::assertNotSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery'
+            && $request->data() === ['trip_id' => 2849149]);
+    }
+
+    public function test_it_can_create_an_authenticated_trip_booking_from_chat(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'action' => 'book_trip',
+                                'trip_id' => 15,
+                                'seat_numbers' => ['A1', 'A2'],
+                                'hotel_id' => null,
+                                'hotel_room_id' => null,
+                                'check_in_date' => null,
+                                'check_out_date' => null,
+                                'total_persons' => null,
+                                'payment_method' => 'bkash',
+                                'payment_reference' => '01700000000',
+                                'needs_more_information' => false,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'tripSummaries' => [
+                        [
+                            'trip_id' => 15,
+                            'trip_name' => 'Beach Flight',
+                            'price' => '550.00',
+                        ],
+                    ],
+                    'seat_layout' => [
+                        ['trip_id' => 15, 'seat_id' => 101, 'seat_number' => 'A1', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 102, 'seat_number' => 'A2', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 103, 'seat_number' => 'A3', 'vehicle_name' => 'Nobo Air', 'is_available' => 0],
+                    ],
+                ],
+                'message' => 'success',
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/booking' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'booking_id' => 99,
+                    'trip_id' => 15,
+                    'payment_id' => 88,
+                    'transaction_reference' => 'TRIPREF001',
+                ],
+                'message' => 'Booking successfully created!',
+            ], 201),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer test-token')
+            ->postJson('/api/chat', [
+                'message' => 'Book trip id 15 seat A1 and A2 with bkash 01700000000',
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('action', 'book_trip')
+            ->assertJsonPath('authentication.synced', true)
+            ->assertJsonPath('booking.type', 'trip')
+            ->assertJsonPath('booking.created', true)
+            ->assertJsonPath('booking.payload.trip_id', 15)
+            ->assertJsonPath('booking.payload.trip_name', 'Beach Flight')
+            ->assertJsonPath('booking.payload.payment_method', 'bkash')
+            ->assertJsonPath('booking.payload.amount', 1100)
+            ->assertJsonPath('message', 'Booking successfully created!');
+
+        $this->assertSame(['A1', 'A2'], $response->json('booking.payload.seat_numbers'));
+        $this->assertStringContainsString('Trip Booking Created', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery'
+            && $request->data() === ['trip_id' => 15]
+            && $request->hasHeader('Authorization', ['Bearer test-token']));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/booking'
+            && $request->data() === [
+                'seatinfo' => [
+                    ['trip_id' => 15, 'seat_id' => 101, 'seat_number' => 'A1'],
+                    ['trip_id' => 15, 'seat_id' => 102, 'seat_number' => 'A2'],
+                ],
+                'paymentinfo' => [
+                    'amount' => 1100.0,
+                    'payment_method' => 'bkash',
+                    'bkash' => '01700000000',
+                ],
+            ]);
+    }
+
+    public function test_it_shows_available_seats_when_customer_only_mentions_the_trip_id_for_booking(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'action' => 'book_trip',
+                                'trip_id' => 15,
+                                'seat_numbers' => [],
+                                'hotel_id' => null,
+                                'hotel_room_id' => null,
+                                'check_in_date' => null,
+                                'check_out_date' => null,
+                                'total_persons' => null,
+                                'payment_method' => null,
+                                'payment_reference' => null,
+                                'needs_more_information' => true,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'tripSummaries' => [
+                        [
+                            'trip_id' => 15,
+                            'trip_name' => 'Beach Flight',
+                            'price' => '550.00',
+                        ],
+                    ],
+                    'seat_layout' => [
+                        ['trip_id' => 15, 'seat_id' => 101, 'seat_number' => 'A1', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                        ['trip_id' => 15, 'seat_id' => 102, 'seat_number' => 'A2', 'vehicle_name' => 'Nobo Air', 'is_available' => 1],
+                    ],
+                ],
+                'message' => 'success',
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer test-token')
+            ->postJson('/api/chat', [
+                'message' => 'I want to book trip id 15',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('action', 'book_trip')
+            ->assertJsonPath('booking.type', 'trip')
+            ->assertJsonPath('booking.created', false)
+            ->assertJsonPath('booking.needs_more_information', true)
+            ->assertJsonPath('booking.payload.trip_id', 15)
+            ->assertJsonPath('booking.seat_information.0.seat_number', 'A1')
+            ->assertJsonPath('message', 'These seats are currently available for this trip. Reply with the seat numbers you want to reserve.');
+
+        $this->assertSame(['A1', 'A2'], $response->json('booking.available_seat_numbers'));
+        $this->assertStringContainsString('Choose Trip Seats', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/tripsummery'
+            && $request->data() === ['trip_id' => 15]);
+    }
+
+    public function test_it_can_create_an_authenticated_hotel_booking_from_chat(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'action' => 'book_hotel',
+                                'trip_id' => null,
+                                'seat_numbers' => [],
+                                'hotel_id' => 9,
+                                'hotel_room_id' => 21,
+                                'check_in_date' => '2026-06-10',
+                                'check_out_date' => '2026-06-12',
+                                'total_persons' => 2,
+                                'payment_method' => 'card',
+                                'payment_reference' => '42424242',
+                                'needs_more_information' => false,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/hotel/9' => Http::response([
+                'isExecture' => 'success',
+                'data' => [
+                    'hotel' => [
+                        'id' => 9,
+                        'name' => 'Sea Place Hotel',
+                        'rooms' => [
+                            [
+                                'room_id' => 21,
+                                'max_occupancy' => 3,
+                                'prices' => [
+                                    [
+                                        'season_start' => '2026-06-01',
+                                        'season_end' => '2026-06-30',
+                                        'price_per_night' => '3500.00',
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'message' => 'success',
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/hotel/booking' => Http::response([
+                'isExecute' => true,
+                'data' => 501,
+                'message' => 'Hotel booking successfully',
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer hotel-token')
+            ->postJson('/api/chat', [
+                'message' => 'Book hotel id 9 room id 21 from 2026-06-10 to 2026-06-12 for 2 guests with card 42424242',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('action', 'book_hotel')
+            ->assertJsonPath('booking.type', 'hotel')
+            ->assertJsonPath('booking.created', true)
+            ->assertJsonPath('booking.payload.hotel_id', 9)
+            ->assertJsonPath('booking.payload.hotel_name', 'Sea Place Hotel')
+            ->assertJsonPath('booking.payload.hotel_room_id', 21)
+            ->assertJsonPath('booking.payload.total_persons', 2)
+            ->assertJsonPath('booking.payload.total_cost', 7000)
+            ->assertJsonPath('message', 'Hotel booking successfully');
+
+        $this->assertStringContainsString('Hotel Booking Created', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'GET'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/hotel/9'
+            && $request->hasHeader('Authorization', ['Bearer hotel-token']));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/hotel/booking'
+            && $request->data() === [
+                'hotel_id' => 9,
+                'hotel_room_id' => 21,
+                'check_in_date' => '2026-06-10',
+                'check_out_date' => '2026-06-12',
+                'total_persons' => 2,
+                'total_cost' => 7000.0,
+                'payment_method' => 'card',
+                'card' => '42424242',
+            ]);
     }
 
     public function test_it_can_create_an_authenticated_customer_ticket_from_chat(): void

@@ -17,6 +17,66 @@ class TravelBookingApiClient
     use LogsTravelBookingRequests;
 
     /**
+     * @return array<string, mixed>
+     */
+    public function fetchTripSummary(string $bearerToken, int $tripId): array
+    {
+        $endpoint = '/api/user/tripsummery';
+        $payload = ['trip_id' => $tripId];
+        $url = $this->endpointUrl($endpoint);
+
+        try {
+            $this->logTravelBookingRequest(
+                resource: 'trip_summary',
+                method: 'POST',
+                url: $url,
+                token: $bearerToken,
+                payload: $payload,
+            );
+
+            $response = $this->baseRequest($bearerToken)->post($url, $payload);
+        } catch (ConnectionException $exception) {
+            return $this->bookingErrorResponse(
+                resource: 'trip_summary',
+                endpoint: $endpoint,
+                status: 503,
+                message: 'Unable to reach the remote TravelBooking trip summary API.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->bookingErrorResponse(
+                resource: 'trip_summary',
+                endpoint: $endpoint,
+                status: 500,
+                message: 'An unexpected error occurred while loading trip booking data.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        }
+
+        $data = $this->normalizePayload($response->json());
+
+        if ($response->successful() && ! $this->normalizedResponseFailed($data)) {
+            return [
+                'error' => false,
+                'resource' => 'trip_summary',
+                'endpoint' => $url,
+                'status' => $response->status(),
+                'data' => $data,
+            ];
+        }
+
+        return $this->bookingErrorResponse(
+            resource: 'trip_summary',
+            endpoint: $endpoint,
+            status: $response->status(),
+            message: $this->bookingMessageForStatus('trip_summary', $response->status(), $data),
+            response: $response,
+        );
+    }
+
+    /**
      * @param  array{title: string, description: string, remarks?: string}  $payload
      * @return array<string, mixed>
      */
@@ -80,6 +140,184 @@ class TravelBookingApiClient
             endpoint: $endpoint,
             status: $response->status(),
             message: $this->ticketMessageForStatus($response->status()),
+            response: $response,
+        );
+    }
+
+    /**
+     * @param  array{seatinfo: array<int, array<string, mixed>>, paymentinfo: array<string, mixed>}  $payload
+     * @return array<string, mixed>
+     */
+    public function createTripBooking(string $bearerToken, array $payload): array
+    {
+        $endpoint = '/api/booking';
+        $url = $this->endpointUrl($endpoint);
+
+        try {
+            $this->logTravelBookingRequest(
+                resource: 'trip_booking',
+                method: 'POST',
+                url: $url,
+                token: $bearerToken,
+                payload: $payload,
+            );
+
+            $response = $this->baseRequest($bearerToken)->post($url, $payload);
+        } catch (ConnectionException $exception) {
+            return $this->bookingErrorResponse(
+                resource: 'trip_booking',
+                endpoint: $endpoint,
+                status: 503,
+                message: 'Unable to reach the remote TravelBooking trip booking API.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->bookingErrorResponse(
+                resource: 'trip_booking',
+                endpoint: $endpoint,
+                status: 500,
+                message: 'An unexpected error occurred while creating the trip booking.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        }
+
+        $data = $this->normalizePayload($response->json());
+
+        if ($response->successful() && ! $this->normalizedResponseFailed($data)) {
+            return [
+                'error' => false,
+                'resource' => 'trip_booking',
+                'endpoint' => $url,
+                'status' => $response->status(),
+                'data' => $data,
+            ];
+        }
+
+        return $this->bookingErrorResponse(
+            resource: 'trip_booking',
+            endpoint: $endpoint,
+            status: $response->status(),
+            message: $this->bookingMessageForStatus('trip_booking', $response->status(), $data),
+            response: $response,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function fetchHotelDetail(string $bearerToken, int $hotelId): array
+    {
+        $endpoint = '/api/hotel/'.$hotelId;
+        $url = $this->endpointUrl($endpoint);
+
+        try {
+            $this->logTravelBookingRequest(
+                resource: 'hotel_detail',
+                method: 'GET',
+                url: $url,
+                token: $bearerToken,
+            );
+
+            $response = $this->baseRequest($bearerToken)->get($url);
+        } catch (ConnectionException $exception) {
+            return $this->bookingErrorResponse(
+                resource: 'hotel_detail',
+                endpoint: $endpoint,
+                status: 503,
+                message: 'Unable to reach the remote TravelBooking hotel detail API.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->bookingErrorResponse(
+                resource: 'hotel_detail',
+                endpoint: $endpoint,
+                status: 500,
+                message: 'An unexpected error occurred while loading hotel details.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        }
+
+        $data = $this->normalizePayload($response->json());
+
+        if ($response->successful() && ! $this->normalizedResponseFailed($data)) {
+            return [
+                'error' => false,
+                'resource' => 'hotel_detail',
+                'endpoint' => $url,
+                'status' => $response->status(),
+                'data' => $data,
+            ];
+        }
+
+        return $this->bookingErrorResponse(
+            resource: 'hotel_detail',
+            endpoint: $endpoint,
+            status: $response->status(),
+            message: $this->bookingMessageForStatus('hotel_detail', $response->status(), $data),
+            response: $response,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function createHotelBooking(string $bearerToken, array $payload): array
+    {
+        $endpoint = '/api/hotel/booking';
+        $url = $this->endpointUrl($endpoint);
+
+        try {
+            $this->logTravelBookingRequest(
+                resource: 'hotel_booking',
+                method: 'POST',
+                url: $url,
+                token: $bearerToken,
+                payload: $payload,
+            );
+
+            $response = $this->baseRequest($bearerToken)->post($url, $payload);
+        } catch (ConnectionException $exception) {
+            return $this->bookingErrorResponse(
+                resource: 'hotel_booking',
+                endpoint: $endpoint,
+                status: 503,
+                message: 'Unable to reach the remote TravelBooking hotel booking API.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->bookingErrorResponse(
+                resource: 'hotel_booking',
+                endpoint: $endpoint,
+                status: 500,
+                message: 'An unexpected error occurred while creating the hotel booking.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        }
+
+        $data = $this->normalizePayload($response->json());
+
+        if ($response->successful() && ! $this->normalizedResponseFailed($data)) {
+            return [
+                'error' => false,
+                'resource' => 'hotel_booking',
+                'endpoint' => $url,
+                'status' => $response->status(),
+                'data' => $data,
+            ];
+        }
+
+        return $this->bookingErrorResponse(
+            resource: 'hotel_booking',
+            endpoint: $endpoint,
+            status: $response->status(),
+            message: $this->bookingMessageForStatus('hotel_booking', $response->status(), $data),
             response: $response,
         );
     }
@@ -240,6 +478,26 @@ class TravelBookingApiClient
     }
 
     /**
+     * @param  array<string, mixed>  $data
+     */
+    private function bookingMessageForStatus(string $resource, int $status, array $data): string
+    {
+        $providerMessage = data_get($data, 'message');
+
+        if (is_string($providerMessage) && trim($providerMessage) !== '') {
+            return trim($providerMessage);
+        }
+
+        return match ($status) {
+            401 => "The remote TravelBooking {$resource} API rejected the forwarded bearer token.",
+            403 => "The authenticated user is not allowed to access the {$resource} action.",
+            404 => "The remote TravelBooking {$resource} API endpoint was not found.",
+            422 => "The remote TravelBooking {$resource} API could not process the supplied booking details.",
+            default => "The remote TravelBooking {$resource} API request failed with HTTP {$status}.",
+        };
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private function extractDetails(?Response $response, ?string $exceptionMessage): ?array
@@ -298,6 +556,52 @@ class TravelBookingApiClient
         $result = [
             'error' => true,
             'resource' => 'tickets',
+            'endpoint' => $this->endpointUrl($endpoint),
+            'status' => $status,
+            'message' => $message,
+        ];
+
+        $details = $this->extractDetails($response, $exceptionMessage);
+
+        if ($details !== null) {
+            $result['details'] = $details;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function normalizedResponseFailed(array $data): bool
+    {
+        $status = $data['status'] ?? $data['isExecute'] ?? $data['isExecture'] ?? null;
+
+        if (is_bool($status)) {
+            return $status === false;
+        }
+
+        if (is_string($status)) {
+            return in_array(Str::lower(trim($status)), ['failed', 'false', 'error'], true);
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function bookingErrorResponse(
+        string $resource,
+        string $endpoint,
+        int $status,
+        string $message,
+        ?Response $response = null,
+        ?string $exceptionMessage = null,
+    ): array {
+        $result = [
+            'error' => true,
+            'resource' => $resource,
             'endpoint' => $this->endpointUrl($endpoint),
             'status' => $status,
             'message' => $message,

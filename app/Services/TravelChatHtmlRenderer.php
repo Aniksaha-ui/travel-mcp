@@ -35,7 +35,7 @@ class TravelChatHtmlRenderer
 
     public function presentationInstruction(): string
     {
-        return 'Present travel results as attractive, professional HTML. Start with a short natural-language summary like "There are 5 trips available for Cox\'s Bazar", then show a quick comparison table when useful, followed by numbered sections such as "Trip 1" or "Hotel 2". Keep the tone human and polished, highlight important details like price, status, rating, and description, and never dump raw JSON.';
+        return 'Present travel results as attractive, professional HTML. Start with a short natural-language summary like "There are 5 trips available for Cox\'s Bazar", then show a quick comparison table when useful, followed by numbered sections such as "Trip 1" or "Hotel 2". Keep the tone human and polished, highlight important details like price, status, rating, and description, and never dump raw JSON. When trips are shown, add a simple booking hint such as "Reply: book the Beach Flight trip" so the customer knows chat can show available seats next.';
     }
 
     /**
@@ -263,6 +263,15 @@ class TravelChatHtmlRenderer
             $html .= '<div style="padding:14px 16px;border-radius:18px;background:#ffffff;border:1px solid #e2e8f0;">';
             $html .= '<p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;">More Details</p>';
             $html .= '<ul style="margin:0;padding-left:18px;color:#0f172a;line-height:1.7;">'.implode('', $details).'</ul>';
+            $html .= '</div>';
+        }
+
+        $bookingHint = $this->bookingHint($title, $headline);
+
+        if ($bookingHint !== null) {
+            $html .= '<div style="margin-top:16px;padding:14px 16px;border-radius:18px;background:#ecfeff;border:1px solid #a5f3fc;">';
+            $html .= '<p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#155e75;">Chat Booking</p>';
+            $html .= '<p style="margin:0;color:#164e63;font-size:14px;line-height:1.7;">'.$this->e($bookingHint).'</p>';
             $html .= '</div>';
         }
 
@@ -516,6 +525,15 @@ class TravelChatHtmlRenderer
             'Hotels' => 'Hotel',
             default => rtrim($title, 's'),
         };
+    }
+
+    private function bookingHint(string $title, string $headline): ?string
+    {
+        if ($title !== 'Trips' || trim($headline) === '') {
+            return null;
+        }
+
+        return 'Reply: book the '.$headline.' trip. If you do not know the seats yet, chat will show the available seat numbers first.';
     }
 
     private function formatCount(int $count, string $resource): string
