@@ -9,6 +9,7 @@ use Throwable;
 class TravelChatService
 {
     public function __construct(
+        private readonly SupportTicketChatService $supportTicketChatService,
         private readonly TravelQueryParser $travelQueryParser,
         private readonly TravelBookingApiClient $travelBookingApiClient,
         private readonly TravelChatLlmResponseGenerator $travelChatLlmResponseGenerator,
@@ -21,6 +22,10 @@ class TravelChatService
      */
     public function handle(string $message, string $bearerToken): array
     {
+        if ($this->supportTicketChatService->shouldHandle($message)) {
+            return $this->supportTicketChatService->handle($message, $bearerToken);
+        }
+
         try {
             $parsed = $this->travelQueryParser->parse($message);
         } catch (Throwable $exception) {
@@ -31,6 +36,7 @@ class TravelChatService
 
             return [
                 'status' => $status,
+                'action' => 'travel_search',
                 'message' => $exception->getMessage() !== ''
                     ? $exception->getMessage()
                     : 'Unable to analyze the travel request with the configured LLM.',
@@ -51,6 +57,7 @@ class TravelChatService
         if (! is_string($searchTerm) || $searchTerm === '') {
             return [
                 'status' => 422,
+                'action' => 'travel_search',
                 'message' => 'Unable to determine the travel search term from the provided message.',
                 'input' => [
                     'message' => $message,
@@ -81,6 +88,7 @@ class TravelChatService
 
         return [
             'status' => $allFailed ? 502 : 200,
+            'action' => 'travel_search',
             'message' => $allFailed
                 ? 'Unable to retrieve travel data from the upstream travel services.'
                 : 'Travel chat response generated successfully.',

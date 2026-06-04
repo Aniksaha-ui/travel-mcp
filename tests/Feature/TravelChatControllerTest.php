@@ -394,4 +394,162 @@ class TravelChatControllerTest extends TestCase
         $this->assertStringContainsString('Beach Flight', (string) $response->json('html.trips'));
         $this->assertStringContainsString('travel-chat-response', (string) $response->json('html.full'));
     }
+
+    public function test_it_can_create_an_authenticated_customer_ticket_from_chat(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'title' => 'Refund pending for booking BK-104',
+                                'description' => 'My refund for booking BK-104 has not arrived yet. Please check it.',
+                                'remarks' => null,
+                                'needs_more_information' => false,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket' => Http::response([
+                'isExecute' => true,
+                'data' => [],
+                'message' => 'Ticket created successfully.',
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer test-token')
+            ->postJson('/api/chat', [
+                'message' => 'Please create a ticket because my refund for booking BK-104 has not arrived yet.',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('action', 'create_ticket')
+            ->assertJsonPath('authentication.synced', true)
+            ->assertJsonPath('authentication.method', 'forwarded_bearer_token')
+            ->assertJsonPath('ticket.created', true)
+            ->assertJsonPath('ticket.payload.title', 'Refund pending for booking BK-104')
+            ->assertJsonPath('ticket.payload.description', 'My refund for booking BK-104 has not arrived yet. Please check it.')
+            ->assertJsonPath('ticket.endpoint', 'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket')
+            ->assertJsonPath('message', 'Ticket created successfully.');
+
+        $this->assertStringContainsString('Ticket Created', (string) $response->json('html.full'));
+        $this->assertStringContainsString('Refund pending for booking BK-104', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://llm.example/v1/chat/completions'
+            && data_get($request->data(), 'messages.1.content') === 'Please create a ticket because my refund for booking BK-104 has not arrived yet.');
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket'
+            && $request->data() === [
+                'title' => 'Refund pending for booking BK-104',
+                'description' => 'My refund for booking BK-104 has not arrived yet. Please check it.',
+            ]
+            && $request->hasHeader('Authorization', ['Bearer test-token']));
+
+        Http::assertSentCount(2);
+    }
+
+    public function test_it_requests_more_ticket_information_when_the_chat_message_is_too_vague(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => '{"title":null,"description":null,"remarks":null,"needs_more_information":true}',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer test-token')
+            ->postJson('/api/chat', [
+                'message' => 'Please create a support ticket.',
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('action', 'create_ticket')
+            ->assertJsonPath('ticket.created', false)
+            ->assertJsonPath('ticket.needs_more_information', true)
+            ->assertJsonPath('message', 'Please share the support issue in more detail so the ticket can be created.');
+
+        $this->assertStringContainsString('More Detail Needed', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://llm.example/v1/chat/completions');
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket');
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_returns_the_upstream_authentication_error_when_ticket_creation_is_rejected(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'title' => 'Booking payment issue',
+                                'description' => 'My booking payment failed and I need support to check it.',
+                                'remarks' => null,
+                                'needs_more_information' => false,
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket' => Http::response([
+                'message' => 'Unauthenticated.',
+            ], 401),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer expired-token')
+            ->postJson('/api/chat', [
+                'message' => 'Please create a ticket because my booking payment failed.',
+            ]);
+
+        $response->assertStatus(401)
+            ->assertJsonPath('action', 'create_ticket')
+            ->assertJsonPath('ticket.created', false)
+            ->assertJsonPath('authentication.synced', true)
+            ->assertJsonPath('message', 'The remote TravelBooking ticket API rejected the forwarded bearer token.');
+
+        $this->assertStringContainsString('Ticket Was Not Created', (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/user/createTicket'
+            && $request->hasHeader('Authorization', ['Bearer expired-token']));
+    }
 }

@@ -17,6 +17,74 @@ class TravelBookingApiClient
     use LogsTravelBookingRequests;
 
     /**
+     * @param  array{title: string, description: string, remarks?: string}  $payload
+     * @return array<string, mixed>
+     */
+    public function createTicket(string $bearerToken, array $payload): array
+    {
+        $endpoint = '/api/user/createTicket';
+        $url = $this->endpointUrl($endpoint);
+
+        try {
+            $this->logTravelBookingRequest(
+                resource: 'tickets',
+                method: 'POST',
+                url: $url,
+                token: $bearerToken,
+                payload: $payload,
+            );
+
+            $response = $this->baseRequest($bearerToken)->post($url, $payload);
+        } catch (ConnectionException $exception) {
+            return $this->ticketErrorResponse(
+                endpoint: $endpoint,
+                status: 503,
+                message: 'Unable to reach the remote TravelBooking ticket API.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->ticketErrorResponse(
+                endpoint: $endpoint,
+                status: 500,
+                message: 'An unexpected error occurred while creating the ticket.',
+                exceptionMessage: $exception->getMessage(),
+            );
+        }
+
+        $data = $this->normalizePayload($response->json());
+
+        if ($response->successful() && data_get($data, 'isExecute') !== false) {
+            return [
+                'error' => false,
+                'resource' => 'tickets',
+                'endpoint' => $url,
+                'status' => $response->status(),
+                'data' => $data,
+            ];
+        }
+
+        if ($response->successful()) {
+            return $this->ticketErrorResponse(
+                endpoint: $endpoint,
+                status: 422,
+                message: is_string(data_get($data, 'message')) && data_get($data, 'message') !== ''
+                    ? (string) data_get($data, 'message')
+                    : 'The remote TravelBooking ticket API could not create the ticket.',
+                response: $response,
+            );
+        }
+
+        return $this->ticketErrorResponse(
+            endpoint: $endpoint,
+            status: $response->status(),
+            message: $this->ticketMessageForStatus($response->status()),
+            response: $response,
+        );
+    }
+
+    /**
      * @param  array<int, string>  $resources
      * @return array<string, array<string, mixed>>
      */
@@ -160,6 +228,17 @@ class TravelBookingApiClient
         };
     }
 
+    private function ticketMessageForStatus(int $status): string
+    {
+        return match ($status) {
+            401 => 'The remote TravelBooking ticket API rejected the forwarded bearer token.',
+            403 => 'The authenticated user is not allowed to create tickets.',
+            404 => 'The remote TravelBooking ticket API endpoint was not found.',
+            422 => 'The remote TravelBooking ticket API could not process the supplied ticket details.',
+            default => "The remote TravelBooking ticket API request failed with HTTP {$status}.",
+        };
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -204,6 +283,33 @@ class TravelBookingApiClient
         }
 
         return ['data' => $payload];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function ticketErrorResponse(
+        string $endpoint,
+        int $status,
+        string $message,
+        ?Response $response = null,
+        ?string $exceptionMessage = null,
+    ): array {
+        $result = [
+            'error' => true,
+            'resource' => 'tickets',
+            'endpoint' => $this->endpointUrl($endpoint),
+            'status' => $status,
+            'message' => $message,
+        ];
+
+        $details = $this->extractDetails($response, $exceptionMessage);
+
+        if ($details !== null) {
+            $result['details'] = $details;
+        }
+
+        return $result;
     }
 
     private function baseRequest(string $token): PendingRequest
