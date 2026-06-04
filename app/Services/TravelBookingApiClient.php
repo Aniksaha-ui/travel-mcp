@@ -20,7 +20,7 @@ class TravelBookingApiClient
      * @param  array<int, string>  $resources
      * @return array<string, array<string, mixed>>
      */
-    public function searchOverview(string $bearerToken, string $location, array $resources): array
+    public function searchOverview(string $bearerToken, string $searchTerm, array $resources): array
     {
         $results = [];
 
@@ -30,13 +30,13 @@ class TravelBookingApiClient
                     bearerToken: $bearerToken,
                     resource: $resource,
                     endpoint: $endpoint,
-                    location: $location,
+                    searchTerm: $searchTerm,
                 );
             } catch (ConnectionException $exception) {
                 $results[$resource] = $this->errorSection(
                     resource: $resource,
                     endpoint: $endpoint,
-                    location: $location,
+                    searchTerm: $searchTerm,
                     status: 503,
                     message: "Unable to reach the remote TravelBooking {$resource} API.",
                     exceptionMessage: $exception->getMessage(),
@@ -47,7 +47,7 @@ class TravelBookingApiClient
                 $results[$resource] = $this->errorSection(
                     resource: $resource,
                     endpoint: $endpoint,
-                    location: $location,
+                    searchTerm: $searchTerm,
                     status: 500,
                     message: "An unexpected error occurred while searching {$resource}.",
                     exceptionMessage: $exception->getMessage(),
@@ -80,10 +80,10 @@ class TravelBookingApiClient
     /**
      * @return array<string, mixed>
      */
-    private function performRequest(string $bearerToken, string $resource, string $endpoint, string $location): array
+    private function performRequest(string $bearerToken, string $resource, string $endpoint, string $searchTerm): array
     {
         $url = $this->endpointUrl($endpoint);
-        $payload = ['location' => $location];
+        $payload = ['location' => $searchTerm];
 
         $this->logTravelBookingRequest(
             resource: $resource,
@@ -101,16 +101,17 @@ class TravelBookingApiClient
                 'error' => false,
                 'resource' => $resource,
                 'endpoint' => $url,
-                'location' => $location,
+                'query' => $searchTerm,
+                'location' => $searchTerm,
                 'status' => $response->status(),
-                'data' => $this->filterPayloadForLocation($this->normalizePayload($response->json()), $location),
+                'data' => $this->filterPayloadForSearchTerm($this->normalizePayload($response->json()), $searchTerm),
             ];
         }
 
         return $this->errorSection(
             resource: $resource,
             endpoint: $endpoint,
-            location: $location,
+            searchTerm: $searchTerm,
             status: $response->status(),
             message: $this->messageForStatus($resource, $response->status()),
             response: $response,
@@ -123,7 +124,7 @@ class TravelBookingApiClient
     private function errorSection(
         string $resource,
         string $endpoint,
-        string $location,
+        string $searchTerm,
         int $status,
         string $message,
         ?Response $response = null,
@@ -133,7 +134,8 @@ class TravelBookingApiClient
             'error' => true,
             'resource' => $resource,
             'endpoint' => $this->endpointUrl($endpoint),
-            'location' => $location,
+            'query' => $searchTerm,
+            'location' => $searchTerm,
             'status' => $status,
             'message' => $message,
         ];
@@ -153,7 +155,7 @@ class TravelBookingApiClient
             401 => "The remote TravelBooking {$resource} API rejected the forwarded bearer token.",
             403 => "The authenticated user is not allowed to access {$resource}.",
             404 => "The remote TravelBooking {$resource} API endpoint was not found.",
-            422 => "The remote TravelBooking {$resource} API could not process the supplied location.",
+            422 => "The remote TravelBooking {$resource} API could not process the supplied search term.",
             default => "The remote TravelBooking {$resource} API request failed with HTTP {$status}.",
         };
     }
@@ -237,7 +239,7 @@ class TravelBookingApiClient
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function filterPayloadForLocation(array $payload, string $location): array
+    private function filterPayloadForSearchTerm(array $payload, string $searchTerm): array
     {
         $items = $payload['data'] ?? null;
 
@@ -247,7 +249,7 @@ class TravelBookingApiClient
 
         $filtered = array_values(array_filter(
             $items,
-            fn (mixed $item): bool => is_array($item) && $this->matchesLocation($item, $location),
+            fn (mixed $item): bool => is_array($item) && $this->matchesSearchTerm($item, $searchTerm),
         ));
 
         $payload['data'] = $filtered;
@@ -258,9 +260,9 @@ class TravelBookingApiClient
     /**
      * @param  array<string, mixed>  $item
      */
-    private function matchesLocation(array $item, string $location): bool
+    private function matchesSearchTerm(array $item, string $searchTerm): bool
     {
-        $normalizedNeedle = $this->normalizeLocationText($location);
+        $normalizedNeedle = $this->normalizeSearchText($searchTerm);
 
         if ($normalizedNeedle === '') {
             return true;
@@ -272,12 +274,16 @@ class TravelBookingApiClient
             $item['country'] ?? null,
             $item['destination'] ?? null,
             $item['name'] ?? null,
+            $item['hotel_name'] ?? null,
+            $item['package_name'] ?? null,
+            $item['trip_name'] ?? null,
             $item['title'] ?? null,
+            $item['address'] ?? null,
             $item['description'] ?? null,
         ], static fn (mixed $value): bool => is_scalar($value) && (string) $value !== '');
 
         foreach ($haystacks as $haystack) {
-            $normalizedHaystack = $this->normalizeLocationText((string) $haystack);
+            $normalizedHaystack = $this->normalizeSearchText((string) $haystack);
 
             if ($normalizedHaystack !== '' && str_contains($normalizedHaystack, $normalizedNeedle)) {
                 return true;
@@ -287,7 +293,7 @@ class TravelBookingApiClient
         return false;
     }
 
-    private function normalizeLocationText(string $value): string
+    private function normalizeSearchText(string $value): string
     {
         $normalized = Str::lower($value);
         $normalized = str_replace(["'", '`'], '', $normalized);

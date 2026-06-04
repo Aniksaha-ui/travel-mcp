@@ -13,7 +13,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tool;
 use Throwable;
 
-#[Description('Uses the configured LLM to extract a normalized travel location and requested resource types from a natural-language customer message.')]
+#[Description('Uses the configured LLM to extract a normalized travel search term, optional destination, requested resource types, and question focus from a natural-language customer message.')]
 class ExtractTravelIntentTool extends Tool
 {
     public function __construct(
@@ -53,8 +53,10 @@ class ExtractTravelIntentTool extends Tool
             Response::text('Travel intent extracted successfully.')
         )->withStructuredContent([
             'error' => false,
+            'search_term' => $parsed['search_term'],
             'location' => $parsed['location'],
             'resources' => $parsed['resources'],
+            'question_focus' => $parsed['question_focus'],
         ])->withMeta([
             'message' => $message,
         ]);
@@ -67,7 +69,7 @@ class ExtractTravelIntentTool extends Tool
     {
         return [
             'message' => $schema->string()
-                ->description('The natural-language customer message to analyze for location and requested travel resource types.')
+                ->description('The natural-language customer message to analyze for a travel search term, optional destination, requested travel resource types, and the main question focus.')
                 ->required(),
         ];
     }

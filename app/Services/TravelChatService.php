@@ -40,25 +40,42 @@ class TravelChatService
             ];
         }
 
+        $searchTerm = $parsed['search_term'] ?? null;
         $location = $parsed['location'];
         $resources = $parsed['resources'];
+        $questionFocus = $parsed['question_focus'] ?? 'general';
+        $displayLabel = is_string($location) && $location !== ''
+            ? $location
+            : (is_string($searchTerm) ? $searchTerm : null);
 
-        if (! is_string($location) || $location === '') {
+        if (! is_string($searchTerm) || $searchTerm === '') {
             return [
                 'status' => 422,
-                'message' => 'Unable to determine the travel location from the provided message.',
+                'message' => 'Unable to determine the travel search term from the provided message.',
                 'input' => [
                     'message' => $message,
                 ],
                 'parsed' => [
+                    'search_term' => null,
                     'location' => null,
                     'resources' => $resources,
+                    'question_focus' => $questionFocus,
                 ],
             ];
         }
 
-        $overview = $this->travelBookingApiClient->searchOverview($bearerToken, $location, $resources);
-        $html = $this->travelChatLlmResponseGenerator->generate($message, $location, $overview, $resources);
+        $overview = $this->travelBookingApiClient->searchOverview($bearerToken, $searchTerm, $resources);
+        $html = $this->travelChatLlmResponseGenerator->generate(
+            $message,
+            [
+                'search_term' => $searchTerm,
+                'location' => is_string($location) && $location !== '' ? $location : null,
+                'display_label' => $displayLabel ?? $searchTerm,
+                'question_focus' => $questionFocus,
+            ],
+            $overview,
+            $resources,
+        );
         $partialFailure = collect($overview)->contains(fn (array $section): bool => ($section['error'] ?? false) === true);
         $allFailed = collect($overview)->every(fn (array $section): bool => ($section['error'] ?? false) === true);
 
@@ -71,8 +88,10 @@ class TravelChatService
                 'message' => $message,
             ],
             'parsed' => [
-                'location' => $location,
+                'search_term' => $searchTerm,
+                'location' => is_string($location) && $location !== '' ? $location : null,
                 'resources' => $resources,
+                'question_focus' => $questionFocus,
             ],
             'partial_failure' => $partialFailure,
             'presentation_instruction' => $this->travelChatHtmlRenderer->presentationInstruction(),

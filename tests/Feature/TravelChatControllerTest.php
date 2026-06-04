@@ -220,6 +220,95 @@ class TravelChatControllerTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_it_can_lookup_a_named_hotel_and_answer_a_location_question(): void
+    {
+        config()->set('services.travel_intent_llm', [
+            'base_url' => 'https://llm.example/v1',
+            'api_key' => 'test-key',
+            'model' => 'gpt-4o-mini',
+            'connect_timeout' => 5,
+            'timeout' => 20,
+            'temperature' => 0,
+        ]);
+
+        $llmHtml = [
+            'full' => '<section class="llm-full"><p>Sea Place Hotel is located in Cox\'s Bazar, Bangladesh.</p></section>',
+            'summary' => '<section class="llm-summary"><p>Sea Place Hotel is in Cox\'s Bazar, Bangladesh.</p></section>',
+            'trips' => '',
+            'packages' => '',
+            'hotels' => '<section class="llm-hotels"><h3>Hotels</h3><p>Sea Place Hotel is listed at Kolatoli Road, Cox\'s Bazar, Bangladesh.</p></section>',
+        ];
+
+        Http::fake([
+            'https://llm.example/v1/chat/completions' => Http::sequence()
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => json_encode([
+                                    'search_term' => 'Sea Place Hotel',
+                                    'location' => null,
+                                    'resources' => ['hotels'],
+                                    'question_focus' => 'location',
+                                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                            ],
+                        ],
+                    ],
+                ], 200)
+                ->push([
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => json_encode($llmHtml, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                            ],
+                        ],
+                    ],
+                ], 200),
+            'https://travelbooking.infinitycodehubltd.com/public/api/hotels*' => Http::response([
+                'data' => [
+                    [
+                        'name' => 'Sea Place Hotel',
+                        'location' => "Cox's Bazar",
+                        'country' => 'Bangladesh',
+                        'address' => 'Kolatoli Road',
+                        'status' => 1,
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeader('Authorization', 'Bearer test-token')
+            ->postJson('/api/chat', [
+                'message' => 'What is the location of Sea Place Hotel?',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('parsed.search_term', 'Sea Place Hotel')
+            ->assertJsonPath('parsed.location', null)
+            ->assertJsonPath('parsed.question_focus', 'location')
+            ->assertJsonPath('data.hotels.error', false);
+
+        $this->assertSame(['hotels'], $response->json('parsed.resources'));
+        $this->assertSame(['hotels'], array_keys($response->json('data')));
+        $this->assertSame($llmHtml['summary'], $response->json('html.summary'));
+        $this->assertStringContainsString("Cox's Bazar", (string) $response->json('html.full'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://llm.example/v1/chat/completions'
+            && data_get($request->data(), 'messages.1.content') === 'What is the location of Sea Place Hotel?');
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://llm.example/v1/chat/completions'
+            && str_contains((string) data_get($request->data(), 'messages.1.content'), '"search_term": "Sea Place Hotel"')
+            && str_contains((string) data_get($request->data(), 'messages.1.content'), '"question_focus": "location"'));
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://travelbooking.infinitycodehubltd.com/public/api/hotels'
+            && $request->data() === ['location' => 'Sea Place Hotel']);
+
+        Http::assertSentCount(3);
+    }
+
     public function test_it_returns_upstream_llm_status_and_message_when_intent_extraction_fails(): void
     {
         config()->set('services.travel_intent_llm', [

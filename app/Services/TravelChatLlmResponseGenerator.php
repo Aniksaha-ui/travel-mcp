@@ -16,18 +16,19 @@ class TravelChatLlmResponseGenerator
     }
 
     /**
+     * @param  array{search_term: string, location: string|null, display_label: string, question_focus: string}  $intent
      * @param  array<string, mixed>  $overview
      * @param  array<int, string>  $requestedResources
      * @return array<string, string>
      */
-    public function generate(string $message, string $location, array $overview, array $requestedResources): array
+    public function generate(string $message, array $intent, array $overview, array $requestedResources): array
     {
-        $fallback = $this->travelChatHtmlRenderer->render($location, $overview, $requestedResources);
+        $fallback = $this->travelChatHtmlRenderer->render($intent['display_label'], $overview, $requestedResources);
 
         try {
             $text = $this->travelLlmClient->chat(
                 systemPrompt: $this->systemPrompt(),
-                userPrompt: $this->userPrompt($message, $location, $overview, $requestedResources),
+                userPrompt: $this->userPrompt($message, $intent, $overview, $requestedResources),
                 temperature: 0.2,
             );
 
@@ -59,23 +60,32 @@ Rules:
 - Each value must be an HTML fragment string, not markdown.
 - Use attractive, professional inline-styled HTML suitable for direct rendering in a chat UI.
 - Keep the wording natural and human.
-- The summary should quickly explain what was found for the location.
+- Answer the customer's actual question using the supplied travel data, not just a generic overview.
+- If the customer asks for a specific fact such as location, price, status, or availability, state that answer clearly near the start of "summary" and "full".
+- Treat "search_term" as the lookup text sent to the travel API. Treat "location" as the confirmed destination only when it is present.
+- If there is a clear direct match for a named hotel, package, or trip, mention that item directly before giving broader context.
+- The summary should quickly explain what was found for the request.
 - Resource sections should be readable and polished, using headings, counts, tables, and concise descriptive blocks when useful.
 - If a resource was not requested, return an empty string for that resource section.
+- If no matching items are found for a requested resource, explain that politely in HTML.
 - If a resource failed, explain that section politely in HTML.
 - Never return raw JSON dumps, code fences, scripts, or explanations outside the JSON object.
 PROMPT;
     }
 
     /**
+     * @param  array{search_term: string, location: string|null, display_label: string, question_focus: string}  $intent
      * @param  array<string, mixed>  $overview
      * @param  array<int, string>  $requestedResources
      */
-    private function userPrompt(string $message, string $location, array $overview, array $requestedResources): string
+    private function userPrompt(string $message, array $intent, array $overview, array $requestedResources): string
     {
         return json_encode([
             'customer_message' => $message,
-            'location' => $location,
+            'search_term' => $intent['search_term'],
+            'location' => $intent['location'],
+            'display_label' => $intent['display_label'],
+            'question_focus' => $intent['question_focus'],
             'requested_resources' => array_values($requestedResources),
             'presentation_instruction' => $this->travelChatHtmlRenderer->presentationInstruction(),
             'travel_data' => $this->compactOverview($overview, $requestedResources),
