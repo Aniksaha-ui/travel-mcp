@@ -6,6 +6,7 @@ namespace App\Services;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class BookingChatService
@@ -231,7 +232,7 @@ class BookingChatService
         ];
 
         $result = $this->travelBookingApiClient->createTripBooking($bearerToken, $payload);
-
+        Log::info("booking response".json_encode($result));
         if (($result['error'] ?? true) === true) {
             return $this->failureResponse(
                 type: 'trip',
@@ -250,7 +251,7 @@ class BookingChatService
             );
         }
 
-        $redirectUrl = data_get($result, 'data.data.redirected_url');
+        $redirectUrl = $this->extractRedirectUrlFromResult($result);
 
         return $this->successResponse(
             type: 'trip',
@@ -412,6 +413,8 @@ class BookingChatService
             );
         }
 
+        $redirectUrl = $this->extractRedirectUrlFromResult($result);
+
         return $this->successResponse(
             type: 'hotel',
             message: (string) (data_get($result, 'data.message') ?? 'Hotel booking created successfully.'),
@@ -426,6 +429,7 @@ class BookingChatService
                 'total_persons' => $parsed['total_persons'],
                 'payment_method' => $parsed['payment_method'],
                 'total_cost' => $totalCost,
+                'redirected_url' => $redirectUrl,
             ],
             endpoint: $result['endpoint'] ?? null,
             upstream: $result['data'] ?? null,
@@ -648,17 +652,29 @@ class BookingChatService
         $redirectUrl = isset($payload['redirected_url']) && is_string($payload['redirected_url'])
             ? $payload['redirected_url']
             : null;
+        $paymentLabel = $this->paymentMethodLabel(
+            isset($payload['payment_method']) && is_string($payload['payment_method'])
+                ? $payload['payment_method']
+                : null,
+        );
+        $chatMessage = $this->bookingSuccessMessage(
+            type: $type,
+            providerMessage: $message,
+            paymentLabel: $paymentLabel,
+            redirectUrl: $redirectUrl,
+        );
         $html = $this->bookingChatHtmlRenderer->renderCreated(
             title: ucfirst($type).' Booking Created',
-            message: $message,
+            message: $chatMessage,
             details: $details,
             redirectUrl: $redirectUrl,
+            paymentLabel: $paymentLabel,
         );
 
         return [
             'status' => $status,
             'action' => $parsed['action'],
-            'message' => $message,
+            'message' => $chatMessage,
             'authentication' => [
                 'synced' => true,
                 'method' => 'forwarded_bearer_token',
@@ -828,6 +844,75 @@ class BookingChatService
     private function formatMoney(float $amount): string
     {
         return number_format($amount, 2, '.', '');
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function extractRedirectUrlFromResult(array $result): ?string
+    {
+        $paths = [
+            'data.data.redirected_url',
+            'data.data.redirect_url',
+            'data.data.payment_url',
+            'data.data.url',
+            'data.data.redirectedUrl',
+            'data.data.redirectUrl',
+            'data.redirected_url',
+            'data.redirect_url',
+            'data.payment_url',
+            'data.url',
+            'data.redirectedUrl',
+            'data.redirectUrl',
+        ];
+
+        foreach ($paths as $path) {
+            $value = data_get($result, $path);
+
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+
+        return null;
+    }
+
+    private function paymentMethodLabel(?string $paymentMethod): ?string
+    {
+        if ($paymentMethod === null || trim($paymentMethod) === '') {
+            return null;
+        }
+
+        return match (trim($paymentMethod)) {
+            'bkash' => 'bKash',
+            'nagad' => 'Nagad',
+            'internet_banking' => 'internet banking',
+            'card' => 'card',
+            default => trim($paymentMethod),
+        };
+    }
+
+    private function bookingSuccessMessage(
+        string $type,
+        string $providerMessage,
+        ?string $paymentLabel,
+        ?string $redirectUrl,
+    ): string {
+        if (! is_string($redirectUrl) || $redirectUrl === '') {
+            return trim($providerMessage) !== ''
+                ? trim($providerMessage)
+                : ucfirst($type).' booking created successfully.';
+        }
+
+        $base = trim($providerMessage) !== ''
+            ? rtrim(trim($providerMessage), " \t\n\r\0\x0B.!?")
+            : ucfirst($type).' booking created successfully';
+
+        $instruction = $paymentLabel !== null
+            ? 'Complete the '.$paymentLabel.' payment using the payment link below.'
+            : 'Complete the payment using the payment link below.';
+
+        return $base.'. '.$instruction;
     }
 
     /**

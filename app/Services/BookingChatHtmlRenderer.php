@@ -10,7 +10,13 @@ class BookingChatHtmlRenderer
      * @param  array<string, scalar|null>  $details
      * @return array{full: string, summary: string}
      */
-    public function renderCreated(string $title, string $message, array $details, ?string $redirectUrl = null): array
+    public function renderCreated(
+        string $title,
+        string $message,
+        array $details,
+        ?string $redirectUrl = null,
+        ?string $paymentLabel = null,
+    ): array
     {
         $summary = '<section class="booking-chat-summary" style="margin-bottom:18px;">'
             .'<div style="background:linear-gradient(135deg,#0f766e 0%,#0ea5a4 100%);color:#f0fdfa;border-radius:24px;padding:22px;box-shadow:0 20px 45px rgba(15,118,110,0.18);">'
@@ -27,9 +33,17 @@ class BookingChatHtmlRenderer
             .$this->detailList($details);
 
         if (is_string($redirectUrl) && $redirectUrl !== '') {
+            $paymentText = is_string($paymentLabel) && $paymentLabel !== ''
+                ? 'Complete the '.$paymentLabel.' payment using the secure link below.'
+                : 'Complete the payment using the secure link below.';
+
             $full .= '<div style="margin-top:16px;padding:14px 16px;border-radius:18px;background:#ecfeff;border:1px solid #a5f3fc;">'
-                .'<p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#155e75;">Payment Redirect</p>'
-                .'<p style="margin:0;color:#164e63;font-size:14px;line-height:1.7;">'.$this->e($redirectUrl).'</p>'
+                .'<p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#155e75;">Complete Payment</p>'
+                .'<p style="margin:0 0 12px;color:#164e63;font-size:14px;line-height:1.7;">'.$this->e($paymentText).'</p>'
+                .'<p style="margin:0 0 12px;">'
+                .'<a href="'.$this->e($redirectUrl).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#0891b2;color:#ffffff;text-decoration:none;font-weight:700;">Open Payment Link</a>'
+                .'</p>'
+                .'<p style="margin:0;color:#164e63;font-size:14px;line-height:1.7;word-break:break-word;">'.$this->e($redirectUrl).'</p>'
                 .'</div>';
         }
 
